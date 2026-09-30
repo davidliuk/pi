@@ -823,6 +823,7 @@ async function executePreparedToolCall(
 	onUpdate: ToolUpdateSink,
 ): Promise<ExecutedToolCallOutcome> {
 	const updateEvents: Promise<void>[] = [];
+	let updateFailure: { error: unknown } | undefined;
 	let acceptingUpdates = true;
 
 	try {
@@ -832,11 +833,17 @@ async function executePreparedToolCall(
 			signal,
 			(partialResult) => {
 				if (!acceptingUpdates) return;
-				updateEvents.push(Promise.resolve(onUpdate(partialResult)));
+				// Handle rejections immediately, even while the tool is still running.
+				updateEvents.push(
+					Promise.resolve(onUpdate(partialResult)).catch((error: unknown) => {
+						updateFailure ??= { error };
+					}),
+				);
 			},
 		);
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
+		if (updateFailure) throw updateFailure.error;
 		return { result, isError: result.isError === true };
 	} catch (error) {
 		acceptingUpdates = false;
